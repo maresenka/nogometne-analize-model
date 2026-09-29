@@ -1,0 +1,41 @@
+name: Dnevni model prognoza
+
+on:
+  schedule:
+    # Pokreće se svaki dan u 06:00 UTC (~08:00 po hrvatskom vremenu ljeti).
+    # Prilagodi vrijeme po želji: https://crontab.guru
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}   # omogućuje i ručno pokretanje s taba "Actions" na GitHubu
+
+permissions:
+  contents: write
+
+jobs:
+  run-model:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Preuzmi repozitorij
+        uses: actions/checkout@v4
+
+      - name: Postavi Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instaliraj ovisnosti
+        run: pip install -r requirements.txt
+
+      - name: Pokreni model
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
+        run: python model.py
+
+      - name: Commitaj nove rezultate
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/elo_ratings.json data/recent_form.json data/referee_stats.json data/team_stats.json docs/picks.json
+          git diff --quiet --cached || git commit -m "Dnevno ažuriranje prognoza"
+          git push

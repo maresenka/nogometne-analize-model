@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nogometne analize — dnevni model</title>
+<meta name="description" content="Automatski model rangira nogometne utakmice sljedeća 3 dana po statističkoj prilici.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0e14;--surface:#12161f;--ink:#eef1f6;--muted:#93a0b4;--accent:#d6ff3f;--accent-ink:#0b0e14;--line:#242b38}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 17px/1.6 Inter,system-ui,sans-serif}
+h1,h2,h3{font-family:"Space Grotesk",sans-serif;margin:0}
+.wrap{max-width:900px;margin:0 auto;padding:0 20px}
+header{padding:48px 0 24px}
+h1{font-size:clamp(30px,6vw,44px)}
+.muted{color:var(--muted)}
+.meta{font-size:14px;color:var(--muted);margin-top:10px}
+.disclaimer{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:14px 18px;margin:20px 0 32px;font-size:15px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:14px}
+.card .row1{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline}
+.card .league{font-size:13px;color:var(--accent);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.card h3{font-size:22px;margin:4px 0 10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-top:10px}
+.stat{background:#0000002e;border:1px solid var(--line);border-radius:8px;padding:8px 10px;text-align:center}
+.stat b{display:block;font-family:"Space Grotesk";font-size:18px}
+.stat span{font-size:12px;color:var(--muted)}
+.pick{display:inline-block;margin-top:12px;background:var(--accent);color:var(--accent-ink);font-weight:700;padding:4px 12px;border-radius:999px;font-size:14px}
+.na{color:var(--muted);font-style:italic;font-size:14px;margin-top:8px}
+.recs{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.rec{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#0000002e;border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:14px}
+.rec b{font-weight:700}
+.risk{font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px}
+.risk.Nizak{background:#2e5f3f;color:#c9ffd8}
+.risk.Srednji{background:#5f5a2e;color:#fff3c9}
+.risk.Visok{background:#5f2e2e;color:#ffd0d0}
+details.extra{margin-top:12px;font-size:14px}
+details.extra summary{cursor:pointer;color:var(--muted)}
+details.extra .inner{padding-top:8px;color:var(--muted)}
+.tag-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.tag-list span{border:1px solid var(--line);border-radius:6px;padding:2px 8px;font-size:12px}
+#status{color:var(--muted);padding:40px 0}
+footer{padding:40px 0 60px;color:var(--muted);font-size:14px;border-top:1px solid var(--line);margin-top:30px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Dnevne preporuke — model</h1>
+    <p class="muted">Automatski rangirane utakmice za naredna 3 dana, na temelju Elo rejtinga i tržišnih kvota.</p>
+    <p class="meta" id="generated">Učitavanje…</p>
+  </header>
+
+  <div class="disclaimer">
+    Ovo su statističke procjene, ne jamstvo ishoda. Nijedan model ne garantira dobitak.
+    Kladi se odgovorno i samo novcem koji si možeš priuštiti izgubiti. Sadržaj je namijenjen
+    isključivo osobama starijim od 18 godina.
+  </div>
+
+  <div id="status">Učitavanje današnjih preporuka…</div>
+  <div id="picks"></div>
+
+  <footer>
+    Kvote su prosjek dostupnih kladionica u regiji i ne moraju odgovarati točno SuperSport kvoti u svakom trenutku.
+  </footer>
+</div>
+
+<script>
+const LABELS = {"1": "Pobjeda domaćina", "X": "Remi", "2": "Pobjeda gosta"};
+
+async function load() {
+  const statusEl = document.getElementById('status');
+  const picksEl = document.getElementById('picks');
+  const genEl = document.getElementById('generated');
+  try {
+    const res = await fetch('./picks.json', {cache: 'no-store'});
+    if (!res.ok) throw new Error('picks.json nije dostupan');
+    const data = await res.json();
+
+    const dt = new Date(data.generated_at_utc);
+    genEl.textContent = 'Ažurirano: ' + dt.toLocaleString('hr-HR', {dateStyle: 'medium', timeStyle: 'short'});
+
+    if (!data.picks || data.picks.length === 0) {
+      statusEl.textContent = 'Trenutno nema dostupnih preporuka za ovaj period.';
+      return;
+    }
+    statusEl.remove();
+
+    data.picks.forEach(p => {
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const kickoff = new Date(p.kickoff_utc);
+      const kickoffStr = kickoff.toLocaleString('hr-HR', {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+
+      let oddsHtml = '<p class="na">Kvote: nije dostupno</p>';
+      if (p.market_odds) {
+        oddsHtml = `<div class="grid">
+          <div class="stat"><b>${p.market_odds["1"]}</b><span>1</span></div>
+          <div class="stat"><b>${p.market_odds["X"]}</b><span>X</span></div>
+          <div class="stat"><b>${p.market_odds["2"]}</b><span>2</span></div>
+        </div>`;
+      }
+
+      let recsHtml = '';
+      if (p.top_preporuke && p.top_preporuke.length) {
+        recsHtml = '<div class="recs">' + p.top_preporuke.map(r => {
+          const label = LABELS[r.pick] || r.pick;
+          const edgeStr = r.edge != null ? ' · edge ' + (r.edge*100).toFixed(1) + '%' : '';
+          const oddsStr = r.odds != null ? ' @ ' + r.odds : '';
+          return `<div class="rec"><span><b>${r.market}:</b> ${label}${oddsStr}${edgeStr}</span><span class="risk ${r.risk}">${r.risk}</span></div>`;
+        }).join('') + '</div>';
+      }
+
+      let h2hHtml = '<p class="na">Nije dostupno</p>';
+      if (Array.isArray(p.medusobni_susreti) && p.medusobni_susreti.length) {
+        h2hHtml = '<div class="tag-list">' + p.medusobni_susreti.map(m =>
+          `<span>${m.datum}: ${m.domacin} ${m.rezultat} ${m.gost}</span>`).join('') + '</div>';
+      } else if (Array.isArray(p.medusobni_susreti)) {
+        h2hHtml = '<p class="na">Nema zabilježenih susreta</p>';
+      }
+
+      let injuriesHtml = '<p class="na">Nije dostupno</p>';
+      if (Array.isArray(p.ozljede_suspenzije) && p.ozljede_suspenzije.length) {
+        injuriesHtml = '<div class="tag-list">' + p.ozljede_suspenzije.map(i =>
+          `<span>${i.player} (${i.team}) – ${i.reason || ''}</span>`).join('') + '</div>';
+      } else if (Array.isArray(p.ozljede_suspenzije)) {
+        injuriesHtml = '<p class="na">Nema prijavljenih ozljeda</p>';
+      }
+
+      const napomeneList = p.napomene ? Object.values(p.napomene).map(n => `<li>${n}</li>`).join('') : '';
+
+      card.innerHTML = `
+        <div class="row1"><span class="league">${p.league}</span><span class="muted">${kickoffStr}</span></div>
+        <h3>${p.home} – ${p.away}</h3>
+        ${oddsHtml}
+        ${recsHtml}
+        <details class="extra"><summary>Međusobni susreti i ozljede</summary>
+          <div class="inner">
+            <p><strong>H2H:</strong></p>${h2hHtml}
+            <p><strong>Ozljede/suspenzije:</strong></p>${injuriesHtml}
+          </div>
+        </details>
+        <details class="extra"><summary>Kategorije koje nisu automatski dostupne</summary>
+          <div class="inner"><ul>${napomeneList}</ul></div>
+        </details>
+      `;
+      picksEl.appendChild(card);
+    });
+  } catch (e) {
+    statusEl.textContent = 'Preporuke trenutno nisu dostupne. Pokušaj kasnije.';
+    console.error(e);
+  }
+}
+load();
+</script>
+</body>
+</html>
